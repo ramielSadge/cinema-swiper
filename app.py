@@ -6,7 +6,8 @@ from flask import Flask, render_template_string, request, redirect
 from playwright.sync_api import sync_playwright
 import mysql.connector
 from dotenv import load_dotenv
-
+from urllib.parse import urlparse
+import mysql.connector
 # ---------------------- Environment ---------------------- #
 load_dotenv()  # only needed locally; Railway sets env vars automatically
 TMDB_API_KEY = os.getenv("TMDB_API_KEY")
@@ -15,12 +16,26 @@ TMDB_API_KEY = os.getenv("TMDB_API_KEY")
 app = Flask(__name__)
 
 # ---------------------- Database Connection ---------------------- #
-db = mysql.connector.connect(
-    host=os.getenv("MYSQL_HOST", "localhost"),
-    user=os.getenv("MYSQL_USER", "root"),
-    password=os.getenv("MYSQL_PASSWORD", ""),
-    database=os.getenv("MYSQL_DB", "cinema_swiper")
-)
+db_url = os.getenv("DATABASE_URL")
+if db_url:
+    parsed = urlparse(db_url)
+    db = mysql.connector.connect(
+        host=parsed.hostname,
+        user=parsed.username,
+        password=parsed.password,
+        database=parsed.path.lstrip('/'),
+        port=parsed.port or 3306
+    )
+else:
+    # fallback to local .env
+    from dotenv import load_dotenv
+    load_dotenv()
+    db = mysql.connector.connect(
+        host=os.getenv("MYSQL_HOST", "localhost"),
+        user=os.getenv("MYSQL_USER", "root"),
+        password=os.getenv("MYSQL_PASSWORD", ""),
+        database=os.getenv("MYSQL_DB", "cinema_swiper")
+    )
 
 cursor = db.cursor(dictionary=True)
 
@@ -246,3 +261,4 @@ footer{position:fixed;bottom:15px;left:15px;opacity:0.8;font-size:12px;color:#aa
 if __name__ == "__main__":
     load_users_from_db()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
