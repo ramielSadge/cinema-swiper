@@ -21,13 +21,12 @@ TMDB_API_KEY = os.getenv("TMDB_API_KEY")
 import mysql.connector
 
 db = mysql.connector.connect(
-    host=os.getenv("MYSQLHOST", "localhost"),
-    user=os.getenv("MYSQLUSER", "root"),
-    password=os.getenv("MYSQLPASSWORD", ""),
-    database=os.getenv("MYSQLDATABASE", ""),
-    port=int(os.getenv("MYSQLPORT", 3306))
+    host=os.getenv("MYSQLHOST"),
+    user=os.getenv("MYSQLUSER"),
+    password=os.getenv("MYSQLPASSWORD"),
+    database=os.getenv("MYSQLDATABASE"),
+    port=os.getenv("MYSQLPORT")
 )
-
 print("[INFO] ✅ Connected to MySQL at", os.getenv("MYSQLHOST"))
 cursor = db.cursor(dictionary=True)
 
@@ -271,4 +270,5 @@ document.addEventListener('keydown', function(e) {
 if __name__ == "__main__":
     load_users_from_db()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
 
