@@ -68,13 +68,14 @@ def split_favorites(fav_text):
 def get_favorites(username):
     """Scrape 4 favorite films from Letterboxd using Playwright."""
     try:
+        print("[INFO] Launching Playwright...")
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
             page = browser.new_page()
             page.goto(f"https://letterboxd.com/{username}/", timeout=30000)
             content = page.locator("meta[name='description']").get_attribute("content")
             browser.close()
-
+        print("[INFO] Finished scraping favorites.")
             if not content:
                 return None
 
@@ -270,5 +271,6 @@ document.addEventListener('keydown', function(e) {
 if __name__ == "__main__":
     load_users_from_db()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
 
 
