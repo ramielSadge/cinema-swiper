@@ -10,11 +10,14 @@ TMDB_API_KEY = "0860b24129791ad61907f7425b4dda17"
 app = Flask(__name__)
 
 # ---------------------- Database Connection ---------------------- #
+import os
+
 db = mysql.connector.connect(
-    host="localhost",
-    user="root",
-    password="akidiscool12",
-    database="cinema_swiper"
+    host=os.getenv("MYSQLHOST", "localhost"),
+    user=os.getenv("MYSQLUSER", "root"),
+    password=os.getenv("MYSQLPASSWORD", ""),
+    database=os.getenv("MYSQLDATABASE", "cinema_swiper"),
+    port=os.getenv("MYSQLPORT", 3306)
 )
 cursor = db.cursor(dictionary=True)
 
