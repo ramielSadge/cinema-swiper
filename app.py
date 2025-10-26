@@ -18,16 +18,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 TMDB_API_KEY = os.getenv("TMDB_API_KEY")
-import mysql.connector
 
 db = mysql.connector.connect(
-    host=os.getenv("MYSQLHOST"),
-    user=os.getenv("MYSQLUSER"),
-    password=os.getenv("MYSQLPASSWORD"),
-    database=os.getenv("MYSQLDATABASE"),
-    port=os.getenv("MYSQLPORT")
+    host=os.getenv("MYSQL_HOST"),
+    user=os.getenv("MYSQL_USER"),
+    password=os.getenv("MYSQL_PASSWORD"),
+    database=os.getenv("MYSQL_DB")
 )
-print("[INFO] ✅ Connected to MySQL at", os.getenv("MYSQLHOST"))
+
 cursor = db.cursor(dictionary=True)
 
 user_queue = []
@@ -66,59 +64,27 @@ def split_favorites(fav_text):
 
 
 def get_favorites(username):
-    """Scrape 4 favorite films from a Letterboxd user profile."""
-    from playwright.sync_api import sync_playwright
-    import re
-
+    """Scrape 4 favorite films from Letterboxd using Playwright."""
     try:
-        print(f"[INFO] Scraping favorites for {username}...")
         with sync_playwright() as p:
             browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
             page = browser.new_page()
-            page.goto(f"https://letterboxd.com/{username}/", timeout=60000)
-
-            # Try meta description first
+            page.goto(f"https://letterboxd.com/{username}/", timeout=30000)
             content = page.locator("meta[name='description']").get_attribute("content")
-            if content:
-                # Look for favorites pattern even if 'Bio:' is missing
-                match = re.search(r"Favorites:\s*(.+?)(?:\.?\s*Bio:|$)", content)
-                if match:
-                    fav_text = match.group(1).replace("…", "...")
-                    films = re.split(r"\),\s*", fav_text)
-                    films = [f + ")" if not f.endswith(")") else f for f in films]
-                    favorites = []
-                    for f in films[:4]:
-                        m = re.match(r"(.+?)\s*\((\d{4})\)", f.strip())
-                        if m:
-                            title, year = m.groups()
-                            favorites.append({"title": title.strip(), "year": year})
-                    if favorites:
-                        print(f"[INFO] ✅ Found {len(favorites)} favorites for {username}")
-                        browser.close()
-                        return favorites
-
-            # Fallback: scrape favorites section in HTML
-            page.wait_for_selector("section.favorites li.film-poster img", timeout=10000)
-            films = page.locator("section.favorites li.film-poster img").all()
-            favorites = []
-            for film in films[:4]:
-                alt_text = film.get_attribute("alt")
-                if not alt_text:
-                    continue
-                match = re.match(r"(.+?),\s*(\d{4})", alt_text)
-                if match:
-                    title, year = match.groups()
-                    favorites.append({"title": title.strip(), "year": year})
-                else:
-                    favorites.append({"title": alt_text.strip(), "year": None})
-
             browser.close()
-            print(f"[INFO] ✅ Found {len(favorites)} favorites for {username}")
-            return favorites if favorites else None
 
-    except Exception as e:
-        print(f"[ERROR] Failed to scrape favorites for {username}: {e}")
+            if not content:
+                return None
+
+            match = re.search(r"Favorites:\s*(.+?)(?:\.?\s*Bio:|$)", content)
+            if not match:
+                return None
+
+            fav_text = match.group(1).replace("…", "...")
+            return split_favorites(fav_text)
+    except Exception:
         return None
+
 
 def get_tmdb_info(title, year=None):
     """Fetch TMDb poster and link for a film title, using year if available."""
@@ -290,6 +256,15 @@ document.addEventListener('keydown', function(e) {
         window.location.reload();
     }
 });
+// Automatically hide status messages after 10 seconds
+const statusMsg = document.querySelector('.status');
+if (statusMsg) {
+    setTimeout(() => {
+        statusMsg.style.transition = 'opacity 0.5s ease';
+        statusMsg.style.opacity = '0';
+        setTimeout(() => statusMsg.remove(), 500); // remove completely after fade
+    }, 5000);
+}
 </script>
 
 </body>
@@ -302,8 +277,3 @@ document.addEventListener('keydown', function(e) {
 if __name__ == "__main__":
     load_users_from_db()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-
-
-
-
-
