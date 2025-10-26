@@ -5,12 +5,12 @@ import mysql.connector
 from flask import Flask, render_template_string, request, redirect
 from playwright.sync_api import sync_playwright
 
-TMDB_API_KEY = "0860b24129791ad61907f7425b4dda17"
+import os
+TMDB_API_KEY = os.getenv("TMDB_API_KEY")
 
 app = Flask(__name__)
 
 # ---------------------- Database Connection ---------------------- #
-import os
 
 db = mysql.connector.connect(
     host=os.getenv("MYSQLHOST", "localhost"),
@@ -261,3 +261,4 @@ document.addEventListener('keydown', function(e) {
 if __name__ == "__main__":
     load_users_from_db()
     app.run(debug=True)
+
