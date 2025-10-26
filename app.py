@@ -75,7 +75,7 @@ def get_favorites(username):
             page.goto(f"https://letterboxd.com/{username}/", timeout=30000)
             content = page.locator("meta[name='description']").get_attribute("content")
             browser.close()
-        print("[INFO] Finished scraping favorites.")
+            print("[INFO] Finished scraping favorites.")
             if not content:
                 return None
 
@@ -271,6 +271,7 @@ document.addEventListener('keydown', function(e) {
 if __name__ == "__main__":
     load_users_from_db()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
 
 
 
