@@ -41,7 +41,7 @@ def user_exists(username):
     except Exception:
         return False
 
-
+ 
 def split_favorites(fav_text):
     """
     Split favorites using commas only after the closing parenthesis,
@@ -277,3 +277,4 @@ if (statusMsg) {
 if __name__ == "__main__":
     load_users_from_db()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
