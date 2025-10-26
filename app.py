@@ -4,7 +4,6 @@ import requests
 import mysql.connector
 from flask import Flask, render_template_string, request, redirect
 from playwright.sync_api import sync_playwright
-
 import os
 TMDB_API_KEY = os.getenv("TMDB_API_KEY")
 
@@ -12,13 +11,20 @@ app = Flask(__name__)
 
 # ---------------------- Database Connection ---------------------- #
 
+
+import os
+from dotenv import load_dotenv
+load_dotenv()
+
+TMDB_API_KEY = os.getenv("TMDB_API_KEY")
+
 db = mysql.connector.connect(
-    host=os.getenv("MYSQLHOST", "localhost"),
-    user=os.getenv("MYSQLUSER", "root"),
-    password=os.getenv("MYSQLPASSWORD", ""),
-    database=os.getenv("MYSQLDATABASE", "cinema_swiper"),
-    port=os.getenv("MYSQLPORT", 3306)
+    host=os.getenv("MYSQL_HOST"),
+    user=os.getenv("MYSQL_USER"),
+    password=os.getenv("MYSQL_PASSWORD"),
+    database=os.getenv("MYSQL_DB")
 )
+
 cursor = db.cursor(dictionary=True)
 
 user_queue = []
@@ -260,5 +266,4 @@ document.addEventListener('keydown', function(e) {
 
 if __name__ == "__main__":
     load_users_from_db()
-    app.run(debug=True)
-
+    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
