@@ -2,90 +2,51 @@ import os
 import re
 import random
 import requests
+import subprocess
+import mysql.connector
 from flask import Flask, render_template_string, request, redirect
 from playwright.sync_api import sync_playwright
-import mysql.connector
-from dotenv import load_dotenv
-from urllib.parse import urlparse
-import mysql.connector
-# ---------------------- Environment ---------------------- #
-load_dotenv()  # only needed locally; Railway sets env vars automatically
-TMDB_API_KEY = os.getenv("TMDB_API_KEY")
+
+# ---------------------- Ensure Playwright Browsers Exist ---------------------- #
+try:
+    if not os.path.exists("/root/.cache/ms-playwright/chromium_headless_shell-1187"):
+        print("[INFO] Playwright browsers not found. Installing now...")
+        subprocess.run(
+            ["python", "-m", "playwright", "install", "--with-deps"],
+            check=True
+        )
+        print("[INFO] Playwright browsers installed successfully.")
+except Exception as e:
+    print("[WARN] Could not preinstall Playwright browsers:", e)
+
+# ---------------------- TMDB API Key ---------------------- #
+TMDB_API_KEY = os.getenv("TMDB_API_KEY", "0860b24129791ad61907f7425b4dda17")
 
 # ---------------------- Flask App ---------------------- #
 app = Flask(__name__)
 
 # ---------------------- Database Connection ---------------------- #
-db_url = os.getenv("DATABASE_URL")
-if db_url:
-    parsed = urlparse(db_url)
-    db = mysql.connector.connect(
-        host=parsed.hostname,
-        user=parsed.username,
-        password=parsed.password,
-        database=parsed.path.lstrip('/'),
-        port=parsed.port or 3306
-    )
-else:
-    # fallback to local .env
-    from dotenv import load_dotenv
-    load_dotenv()
-    db = mysql.connector.connect(
-        host=os.getenv("MYSQL_HOST", "localhost"),
-        user=os.getenv("MYSQL_USER", "root"),
-        password=os.getenv("MYSQL_PASSWORD", ""),
-        database=os.getenv("MYSQL_DB", "cinema_swiper")
-    )
+db = mysql.connector.connect(
+    host=os.getenv("MYSQLHOST", "localhost"),
+    user=os.getenv("MYSQLUSER", "root"),
+    password=os.getenv("MYSQLPASSWORD", ""),
+    database=os.getenv("MYSQLDATABASE", ""),
+    port=int(os.getenv("MYSQLPORT", 3306))
+)
+cursor = db.cursor()
 
-cursor = db.cursor(dictionary=True)
-
-# Automatically create tables if they don't exist
+# ---------------------- Create Tables if not exist ---------------------- #
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS users (
     id INT AUTO_INCREMENT PRIMARY KEY,
-    username VARCHAR(255) NOT NULL UNIQUE
-)
-""")
-cursor.execute("""
-CREATE TABLE IF NOT EXISTS favorites (
-    id INT AUTO_INCREMENT PRIMARY KEY,
-    user_id INT NOT NULL,
-    title VARCHAR(255),
-    poster VARCHAR(255),
-    url VARCHAR(255),
-    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    username VARCHAR(255) UNIQUE,
+    favorites TEXT
 )
 """)
 db.commit()
 
-user_queue = []
-
-# ---------------------- Utility Functions ---------------------- #
-def user_exists(username):
-    """Check if a Letterboxd user exists."""
-    try:
-        r = requests.get(f"https://letterboxd.com/{username}/", timeout=5)
-        return r.status_code == 200
-    except Exception:
-        return False
-
-def split_favorites(fav_text):
-    """Parse favorite films into title/year."""
-    films = re.split(r'\),\s*', fav_text)
-    films = [f + ')' if not f.endswith(')') else f for f in films]
-
-    results = []
-    for f in films[:4]:
-        match = re.match(r'(.+?)\s*\((\d{4})\)', f.strip())
-        if match:
-            title, year = match.groups()
-            results.append({"title": title.strip(), "year": year})
-        else:
-            results.append({"title": f.strip(), "year": None})
-    return results
-
-def get_favorites(username):
-    """Scrape 4 favorite films from Letterboxd using Playwright."""
+# ---------------------- Helper Functions ---------------------- #
+def get_favorites_from_letterboxd(username):
     try:
         with sync_playwright() as p:
             browser = p.chromium.launch(
@@ -93,183 +54,89 @@ def get_favorites(username):
                 args=["--no-sandbox", "--disable-setuid-sandbox"]
             )
             page = browser.new_page()
-            page.goto(f"https://letterboxd.com/{username}/", timeout=30000)
+            url = f"https://letterboxd.com/{username}/"
+            page.goto(url, timeout=60000)
 
-            # --- Debugging: print meta description ---
-            content = page.locator("meta[name='description']").get_attribute("content")
-            print(f"[DEBUG] Meta description for {username}: {content}")
+            # Wait for favorite films section
+            page.wait_for_selector(".poster-list -p40 -p70 -p90", timeout=10000)
+            html = page.content()
 
+            # Extract favorites
+            favorites = re.findall(r'data-film-name="([^"]+)"', html)
             browser.close()
 
-            if not content:
-                return None
-
-            match = re.search(r"Favorites:\s*([\s\S]+?)(?:\.?\s*Bio:|$)", content)
-            if not match:
-                print(f"[DEBUG] No favorites found in meta description for {username}")
-                return None
-
-            fav_text = match.group(1).replace("…", "...")
-            return split_favorites(fav_text)
+            if not favorites:
+                raise Exception("No favorites found.")
+            return favorites[:4]
     except Exception as e:
         print(f"[ERROR] Failed to fetch favorites for {username}: {e}")
-        return None
+        return []
 
-def get_tmdb_info(title, year=None):
-    """Fetch TMDb poster and link for a film."""
-    if not TMDB_API_KEY:
-        return None
-    params = {"api_key": TMDB_API_KEY, "query": title}
-    if year:
-        params["primary_release_year"] = year
+def search_tmdb(title):
+    query = requests.utils.quote(title)
+    url = f"https://api.themoviedb.org/3/search/movie?query={query}&api_key={TMDB_API_KEY}"
+    response = requests.get(url)
+    data = response.json()
+    if data.get("results"):
+        return data["results"][0].get("title", title)
+    return title
 
-    r = requests.get("https://api.themoviedb.org/3/search/movie", params=params)
-    if r.status_code != 200 or not r.json().get("results"):
-        return None
-
-    movie = r.json()["results"][0]
-    poster_path = movie.get("poster_path")
-    tmdb_id = movie.get("id")
-    return {
-        "title": f"{title} ({year})" if year else title,
-        "poster": f"https://image.tmdb.org/t/p/w500{poster_path}" if poster_path else None,
-        "url": f"https://www.themoviedb.org/movie/{tmdb_id}" if tmdb_id else None
-    }
-
-def add_user_to_db(username):
-    """Add a Letterboxd user and their favorites to the DB."""
-    cursor.execute("SELECT id FROM users WHERE username=%s", (username,))
-    user = cursor.fetchone()
-    if user:
-        return "already"
-
-    favs = get_favorites(username)
-    if not favs:
-        return "not_found"
-
-    cursor.execute("INSERT INTO users (username) VALUES (%s)", (username,))
-    user_id = cursor.lastrowid
-
-    for film in favs:
-        info = get_tmdb_info(film["title"], film["year"])
-        if info:
-            cursor.execute(
-                "INSERT INTO favorites (user_id, title, poster, url) VALUES (%s,%s,%s,%s)",
-                (user_id, info["title"], info["poster"], info["url"])
-            )
-    db.commit()
-    return "found"
-
-def load_users_from_db():
-    """Load all users/favorites from DB and shuffle them."""
-    global user_queue
-    cursor.execute(
-        "SELECT u.id as user_id, u.username, f.title, f.poster, f.url "
-        "FROM users u LEFT JOIN favorites f ON u.id=f.user_id ORDER BY u.id"
-    )
-    rows = cursor.fetchall()
-
-    users = {}
-    for row in rows:
-        uid = row["user_id"]
-        if uid not in users:
-            users[uid] = {"username": row["username"], "favorites": []}
-        if row["title"]:  # skip if no favorites
-            users[uid]["favorites"].append({
-                "title": row["title"],
-                "poster": row["poster"],
-                "url": row["url"]
-            })
-
-    user_queue = list(users.values())
-    random.shuffle(user_queue)
-
-# ---------------------- Flask Routes ---------------------- #
+# ---------------------- Routes ---------------------- #
 @app.route("/", methods=["GET", "POST"])
 def index():
-    global user_queue
-    message = None
-
+    msg = request.args.get("msg", "")
     if request.method == "POST":
         username = request.form.get("username", "").strip()
-        if username:
-            if not user_exists(username):
-                message = f"User '{username}' not found!"
-            else:
-                result = add_user_to_db(username)
-                if result == "found":
-                    message = f"User '{username}' found!"
-                elif result == "already":
-                    message = f"User '{username}' is already in the database."
-                else:
-                    message = f"User '{username}' has no favorites."
-            load_users_from_db()
-        return redirect(f"/?msg={message}" if message else "/")
+        if not username:
+            return redirect("/?msg=Please enter a username.")
 
-    if not user_queue:
-        load_users_from_db()
+        cursor.execute("SELECT favorites FROM users WHERE username = %s", (username,))
+        result = cursor.fetchone()
 
-    if user_queue:
-        user = user_queue.pop(0)
-        favorites = user["favorites"]
-        username = user["username"]
-    else:
-        favorites = []
-        username = None
+        if result:
+            favorites = result[0].split(",")
+        else:
+            favorites = get_favorites_from_letterboxd(username)
+            if not favorites:
+                return redirect(f"/?msg=User '{username}' has no favorites.")
+            cursor.execute("INSERT INTO users (username, favorites) VALUES (%s, %s)",
+                           (username, ",".join(favorites)))
+            db.commit()
 
-    from flask import request as req
-    msg = req.args.get("msg")
+        # Search TMDB for movie titles
+        matched = [search_tmdb(f) for f in favorites]
 
-    return render_template_string('''
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>Letterboxd Favorites Viewer</title>
-<style>
-body { font-family: Arial; background: #0d1117; color: #fff; text-align: center; margin:0; padding:0; }
-h1 { margin-top:30px; color:#58a6ff; }
-.poster-container { display:flex; justify-content:center; flex-wrap:wrap; gap:20px; margin-top:40px; }
-.poster { width:200px; height:300px; border-radius:12px; object-fit:cover; transition:0.3s; box-shadow:0 4px 10px rgba(0,0,0,0.3);}
-.poster:hover{transform:scale(1.05);}
-button{background:#1f6feb;color:#fff;border:none;padding:12px 24px;margin:0 10px;border-radius:8px;font-size:16px;cursor:pointer;}
-button:hover{background:#2d81f7;}
-footer{position:fixed;bottom:15px;left:15px;opacity:0.8;font-size:12px;color:#aaa;}
-</style>
-</head>
-<body>
-{% if username %}
-<h1>@{{ username }}'s Favorites</h1>
-<div class="poster-container">
-{% for film in favorites %}
-    <a href="{{ film.url }}" target="_blank">
-        <img class="poster" src="{{ film.poster }}" alt="{{ film.title }}">
-    </a>
-{% endfor %}
-</div>
-<div>
-<button onclick="window.location.reload()">← Next User</button>
-<button onclick="window.open('https://letterboxd.com/{{ username }}/', '_blank')">→ View Profile</button>
-</div>
-{% else %}
-<h2>No users yet. Add a username below!</h2>
-{% endif %}
-<form method="POST" style="margin-top:30px;">
-<input type="text" name="username" placeholder="Add Letterboxd username" required>
-<button type="submit">Add User</button>
-</form>
-{% if msg %}
-<div style="margin-top:10px; color:{% if 'not found' in msg.lower() %}#ff4c4c{% else %}#4CAF50{% endif %};">{{ msg }}</div>
-{% endif %}
-<footer>Source: TMDB</footer>
-</body>
-</html>
-''', favorites=favorites, username=username, msg=msg)
+        html = """
+        <html>
+        <head><title>Favorites for {{ username }}</title></head>
+        <body style="font-family:sans-serif; text-align:center; margin-top:50px;">
+            <h2>Favorites for {{ username }}</h2>
+            <ul style="list-style:none;">
+                {% for f in favorites %}
+                    <li>{{ f }}</li>
+                {% endfor %}
+            </ul>
+            <a href="/">Back</a>
+        </body>
+        </html>
+        """
+        return render_template_string(html, username=username, favorites=matched)
 
-# ---------------------- Run App ---------------------- #
+    html = """
+    <html>
+    <head><title>Letterboxd Favorites Finder</title></head>
+    <body style="font-family:sans-serif; text-align:center; margin-top:50px;">
+        <h1>Letterboxd Favorites Finder</h1>
+        <form method="POST">
+            <input type="text" name="username" placeholder="Enter Letterboxd username" required>
+            <button type="submit">Find Favorites</button>
+        </form>
+        {% if msg %}<p style="color:red;">{{ msg }}</p>{% endif %}
+    </body>
+    </html>
+    """
+    return render_template_string(html, msg=msg)
+
+# ---------------------- Run Server ---------------------- #
 if __name__ == "__main__":
-    load_users_from_db()
-    app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
-
-
-
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 8080)))
