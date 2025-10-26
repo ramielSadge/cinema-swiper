@@ -88,7 +88,7 @@ def get_favorites(username):
     """Scrape 4 favorite films from Letterboxd using Playwright."""
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(headless=True, args=["--no-sandbox", "--disable-setuid-sandbox"])
             page = browser.new_page()
             page.goto(f"https://letterboxd.com/{username}/", timeout=30000)
             content = page.locator("meta[name='description']").get_attribute("content")
@@ -261,4 +261,5 @@ footer{position:fixed;bottom:15px;left:15px;opacity:0.8;font-size:12px;color:#aa
 if __name__ == "__main__":
     load_users_from_db()
     app.run(host="0.0.0.0", port=int(os.environ.get("PORT", 5000)))
+
 
